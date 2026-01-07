@@ -1,0 +1,10 @@
+# Python dependencies
+
+fastapi
+uvicorn
+python-dotenv
+supabase
+pydantic
+python-jose
+pydantic[email]
+pydantic-settings
