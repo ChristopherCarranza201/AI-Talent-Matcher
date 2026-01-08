@@ -8,3 +8,6 @@ pydantic
 python-jose
 pydantic[email]
 pydantic-settings
+langchain-openai
+langchain
+openai
