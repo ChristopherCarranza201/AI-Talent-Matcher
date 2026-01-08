@@ -10,8 +10,8 @@ from typing import List
 from pydantic import BaseModel, field_validator
 
 from langchain_openai import ChatOpenAI
-from langchain.prompts import PromptTemplate
-from langchain.output_parsers import PydanticOutputParser
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
 from app.core.config import settings
 
 
