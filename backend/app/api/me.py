@@ -38,7 +38,7 @@ def get_me(
     # ------------------------------------------------------------------
     profile_response = (
         supabase.table("profiles")
-        .select("id, full_name, role, phone")
+        .select("id, full_name, role, role_title, phone, avatar_url")
         .eq("id", user_id)
         .single()
         .execute()
@@ -53,7 +53,9 @@ def get_me(
         "id": profile["id"],
         "full_name": profile["full_name"],
         "role": profile["role"],
+        "role_title": profile.get("role_title"),
         "phone": profile["phone"],
+        "avatar_url": profile.get("avatar_url"),
     }
 
     # ------------------------------------------------------------------

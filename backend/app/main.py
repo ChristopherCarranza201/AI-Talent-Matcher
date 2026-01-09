@@ -4,7 +4,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, me, jobs, applications, candidate_profiles, recruiter_profiles, llm
+from app.api import auth, me, jobs, applications, candidate_profiles, recruiter_profiles, llm, profiles
 
 # Configure logging
 logging.basicConfig(
@@ -32,4 +32,5 @@ app.include_router(jobs.router)
 app.include_router(applications.router)
 app.include_router(candidate_profiles.router)
 app.include_router(recruiter_profiles.router)
+app.include_router(profiles.router)
 app.include_router(llm.router)
