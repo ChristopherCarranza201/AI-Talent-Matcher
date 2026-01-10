@@ -116,9 +116,34 @@ async def upload_avatar(
         )
         
         # Get public URL from Supabase Storage
-        # The get_public_url method returns the full public URL
+        # The get_public_url method returns a string with the full public URL
         from app.core.config import settings
-        avatar_url = supabase.storage.from_("avatars").get_public_url(unique_filename)
+        avatar_url_response = supabase.storage.from_("avatars").get_public_url(unique_filename)
+        
+        # Handle different response formats from Supabase client
+        # Most versions return a string directly, but some might return a dict
+        if isinstance(avatar_url_response, dict):
+            avatar_url = avatar_url_response.get("publicUrl") or avatar_url_response.get("public_url") or avatar_url_response.get("data", {}).get("publicUrl")
+        elif isinstance(avatar_url_response, str):
+            avatar_url = avatar_url_response
+        else:
+            avatar_url = None
+        
+        # Fallback: construct URL manually if get_public_url didn't return a valid URL
+        if not avatar_url or not isinstance(avatar_url, str) or avatar_url.strip() == "":
+            if not settings.SUPABASE_URL:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to generate avatar URL: SUPABASE_URL not configured",
+                )
+            # Construct public URL manually
+            avatar_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/avatars/{unique_filename}"
+        
+        # Log the avatar URL for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Generated avatar URL: {avatar_url}")
+        logger.info(f"Avatar URL type: {type(avatar_url)}")
         
         # Update profile with avatar URL
         profile_response = (

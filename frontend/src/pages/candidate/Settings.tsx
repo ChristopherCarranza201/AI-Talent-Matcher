@@ -53,24 +53,52 @@ export default function Settings() {
     setIsSavingProfile(true);
     try {
       // Upload image first if selected
+      // The upload_avatar endpoint already updates the profile with avatar_url
       if (selectedImage) {
         const uploadResult = await uploadAvatar(selectedImage);
+        
+        // Update local state with the new avatar URL from server response
+        const newAvatarUrl = uploadResult.avatar_url || uploadResult.profile?.avatar_url;
         setProfileData((prev) => ({
           ...prev,
-          avatar_url: uploadResult.avatar_url,
+          avatar_url: newAvatarUrl || prev.avatar_url,
         }));
         setSelectedImage(null);
+        
+        // Update the user data in the cache immediately with the response from server
+        if (uploadResult.profile) {
+          queryClient.setQueryData(["currentUser"], uploadResult.profile);
+        }
       }
 
-      // Update profile
-      await updateProfile({
-        full_name: profileData.full_name,
-        role_title: profileData.role_title,
-        avatar_url: profileData.avatar_url,
-      });
+      // Update profile with other fields (full_name, role_title) if they changed
+      // Do NOT include avatar_url here since it's already updated by upload_avatar
+      const hasChanges = 
+        profileData.full_name !== (user?.full_name || "") ||
+        profileData.role_title !== (user?.role_title || "");
 
-      // Invalidate and refetch user data
-      queryClient.invalidateQueries({ queryKey: ["currentUser"] });
+      if (hasChanges) {
+        const updatePayload: { full_name?: string; role_title?: string } = {};
+        
+        if (profileData.full_name !== (user?.full_name || "")) {
+          updatePayload.full_name = profileData.full_name;
+        }
+        
+        if (profileData.role_title !== (user?.role_title || "")) {
+          updatePayload.role_title = profileData.role_title;
+        }
+
+        const updateResult = await updateProfile(updatePayload);
+        
+        // Update cache with the updated profile
+        if (updateResult.data) {
+          queryClient.setQueryData(["currentUser"], updateResult.data);
+        }
+      }
+
+      // Invalidate and refetch to ensure we have the latest data from server
+      await queryClient.invalidateQueries({ queryKey: ["currentUser"] });
+      await queryClient.refetchQueries({ queryKey: ["currentUser"] });
 
       toast({
         title: "Profile Updated",

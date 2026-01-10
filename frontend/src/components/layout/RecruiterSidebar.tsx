@@ -1,3 +1,4 @@
+import React from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
@@ -42,13 +43,26 @@ export function RecruiterSidebar() {
   
   const userName = user?.full_name || "User";
   const userRole = user?.role_title || "Recruiter";
-  const userAvatar = user?.avatar_url;
+  const userAvatar = user?.avatar_url && typeof user.avatar_url === 'string' && user.avatar_url.trim() !== "" ? user.avatar_url : undefined;
   const userInitials = userName
     .split(" ")
     .map((n) => n[0])
     .join("")
     .toUpperCase()
     .slice(0, 2);
+
+  // Debug logging for avatar URL (only in development)
+  React.useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      if (userAvatar) {
+        console.log("RecruiterSidebar - Avatar URL:", userAvatar);
+        console.log("RecruiterSidebar - Avatar URL type:", typeof userAvatar);
+        console.log("RecruiterSidebar - Avatar URL length:", userAvatar.length);
+      } else {
+        console.log("RecruiterSidebar - No avatar URL available, user avatar_url:", user?.avatar_url);
+      }
+    }
+  }, [userAvatar, user?.avatar_url]);
 
   return (
     <Sidebar className="border-r border-sidebar-border">
@@ -102,7 +116,7 @@ export function RecruiterSidebar() {
         <UserProfileSheet>
           <div className="flex items-center gap-3 mb-3 cursor-pointer hover:bg-sidebar-accent rounded-lg p-2 transition-colors">
             <Avatar className="w-10 h-10">
-              <AvatarImage src={userAvatar || undefined} />
+              <AvatarImage src={userAvatar} alt={userName} />
               <AvatarFallback className="bg-sidebar-accent text-sidebar-accent-foreground">
                 {userInitials}
               </AvatarFallback>
