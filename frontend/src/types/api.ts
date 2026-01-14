@@ -138,6 +138,8 @@ export interface Application {
 }
 
 export interface JobApplication {
+  cv_file_timestamp?: string; // CV file timestamp (YYYYMMDD_HHMMSS) stored when candidate applied
+  cv_file_path?: string; // CV file path stored when candidate applied
   application_id: number;
   status: string;
   display_status?: string; // UI-friendly status: "new", "reviewed", "shortlisted", "accepted", "rejected"

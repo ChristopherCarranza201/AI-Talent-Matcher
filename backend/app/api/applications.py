@@ -23,6 +23,7 @@ from typing import Optional
 from app.api.deps import get_current_user, require_recruiter
 from app.db.supabase import get_supabase
 from app.schemas.application import ApplicationCreate
+from app.services.cv.storage_service import get_latest_cv_file_info
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +236,18 @@ def apply_to_job(
         else:
             # Application doesn't exist - create it
             logger.info(f"Creating new application for user_id: {user_id}, job_id: {payload.job_position_id}")
+            
+            # Get the latest CV file info at the time of application
+            cv_file_info = get_latest_cv_file_info(supabase, user_id)
+            cv_file_path = None
+            cv_file_timestamp = None
+            if cv_file_info:
+                cv_file_path = cv_file_info.get("file_path")
+                cv_file_timestamp = cv_file_info.get("timestamp")
+                logger.info(f"Captured CV file info for application: path={cv_file_path}, timestamp={cv_file_timestamp}")
+            else:
+                logger.warning(f"No CV found for user {user_id} at application time")
+            
             insert_data = {
                 "candidate_profile_id": user_id,
                 "job_position_id": payload.job_position_id,
@@ -246,6 +259,12 @@ def apply_to_job(
                 cover_letter_str = str(payload.cover_letter).strip()
                 if cover_letter_str:
                     insert_data["cover_letter"] = cover_letter_str
+            
+            # Store CV file path and timestamp if available
+            if cv_file_path:
+                insert_data["cv_file_path"] = cv_file_path
+            if cv_file_timestamp:
+                insert_data["cv_file_timestamp"] = cv_file_timestamp
             
             logger.info(f"Inserting application with data: {insert_data}")
             response = (

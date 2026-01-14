@@ -198,8 +198,20 @@ export const getLatestCV = async (): Promise<CVExtractionResponse> => {
   return data;
 };
 
-export const getCandidateCV = async (candidateId: string, appliedAt?: string): Promise<CVExtractionResponse> => {
-  const params = appliedAt ? `?applied_at=${encodeURIComponent(appliedAt)}` : '';
-  const { data } = await apiClient.get<CVExtractionResponse>(`/cv/candidate/${candidateId}${params}`);
+export const getCandidateCV = async (
+  candidateId: string,
+  appliedAt?: string,
+  cvFileTimestamp?: string
+): Promise<CVExtractionResponse> => {
+  const params = new URLSearchParams();
+  if (cvFileTimestamp) {
+    params.set('cv_file_timestamp', cvFileTimestamp);
+  } else if (appliedAt) {
+    params.set('applied_at', appliedAt);
+  }
+  const queryString = params.toString();
+  const { data } = await apiClient.get<CVExtractionResponse>(
+    `/cv/candidate/${candidateId}${queryString ? `?${queryString}` : ''}`
+  );
   return data;
 };

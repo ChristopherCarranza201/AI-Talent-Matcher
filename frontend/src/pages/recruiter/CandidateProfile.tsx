@@ -27,14 +27,48 @@ export default function CandidateProfile() {
   const navigate = useNavigate();
   const { id } = useParams();
   const [searchParams] = useSearchParams();
+  const cvFileTimestamp = searchParams.get('cv_file_timestamp');
   const appliedAt = searchParams.get('applied_at');
 
-  // Fetch CV data at application time if applied_at is provided, otherwise latest
+  // Log the parameters to debug
+  console.log('[CandidateProfile] Component rendered:', {
+    id,
+    cvFileTimestamp,
+    appliedAt,
+    url: window.location.href,
+    pathname: window.location.pathname,
+  });
+
+  // Fetch CV data using CV file timestamp (preferred) or applied_at (fallback), otherwise latest
+  // Use a unique queryKey that includes "Profile" to avoid conflicts with pipeline queries
   const { data: cvData, isLoading: isLoadingCV, error: cvError } = useQuery<CVExtractionResponse>({
-    queryKey: ["candidateCV", id, appliedAt],
-    queryFn: () => getCandidateCV(id!, appliedAt || undefined),
+    queryKey: ["candidateCVProfile", id, cvFileTimestamp || appliedAt || "latest"],
+    queryFn: async () => {
+      console.log('[CandidateProfile] Fetching CV:', {
+        candidateId: id,
+        cvFileTimestamp: cvFileTimestamp || undefined,
+        appliedAt: appliedAt || undefined,
+        queryKey: ["candidateCVProfile", id, cvFileTimestamp || appliedAt || "latest"],
+      });
+      
+      if (!id) {
+        throw new Error("Candidate ID is required");
+      }
+      
+      const result = await getCandidateCV(id, appliedAt || undefined, cvFileTimestamp || undefined);
+      console.log('[CandidateProfile] CV fetched:', {
+        candidateId: id,
+        cvName: result?.cv_data?.identity?.full_name,
+        cvFileTimestamp: cvFileTimestamp || undefined,
+        appliedAt: appliedAt || undefined,
+      });
+      return result;
+    },
     enabled: !!id,
     retry: false,
+    staleTime: 0, // Always fetch fresh data
+    gcTime: 0, // Don't cache
+    refetchOnMount: true, // Always refetch when component mounts
   });
 
   // Extract data from CV
@@ -95,7 +129,7 @@ export default function CandidateProfile() {
         <div className="flex-1">
           <h1 className="text-2xl font-bold">Candidate Profile</h1>
           <p className="text-muted-foreground">
-            {appliedAt ? "Viewing CV version at time of application" : "Viewing latest CV"}
+            {cvFileTimestamp ? "Viewing CV version from application time" : appliedAt ? "Viewing CV version at time of application" : "Viewing latest CV"}
           </p>
         </div>
         <div className="flex gap-2">

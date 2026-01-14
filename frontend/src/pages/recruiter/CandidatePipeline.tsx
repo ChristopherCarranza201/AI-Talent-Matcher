@@ -44,6 +44,8 @@ export default function CandidatePipeline() {
       updateApplicationStatus(applicationId, status),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["recruiterApplications"] });
+      // Also invalidate CV queries to ensure fresh data
+      queryClient.invalidateQueries({ queryKey: ["candidateCV"] });
     },
     onError: (error: any) => {
       toast({
@@ -71,13 +73,23 @@ export default function CandidatePipeline() {
     }
   };
 
-  const handleViewProfile = (application: JobApplication) => {
-    // Navigate to candidate profile with applied_at timestamp to get CV version at application time
+  const handleViewProfile = (candidateId: string, cvFileTimestamp?: string, appliedAt?: string) => {
+    // Navigate to candidate profile with CV file timestamp (preferred) or applied_at (fallback)
+    // CV file timestamp is the exact file that was active when candidate applied
+    console.log('[View Profile] Navigating to candidate profile:', {
+      candidateId,
+      cvFileTimestamp,
+      appliedAt,
+      url: `/recruiter/candidates/${candidateId}${cvFileTimestamp ? `?cv_file_timestamp=${cvFileTimestamp}` : appliedAt ? `?applied_at=${appliedAt}` : ''}`,
+    });
+    
     const params = new URLSearchParams();
-    if (application.applied_at) {
-      params.set('applied_at', application.applied_at);
+    if (cvFileTimestamp) {
+      params.set('cv_file_timestamp', cvFileTimestamp);
+    } else if (appliedAt) {
+      params.set('applied_at', appliedAt);
     }
-    navigate(`/recruiter/candidates/${application.candidate.id}?${params.toString()}`);
+    navigate(`/recruiter/candidates/${candidateId}${params.toString() ? `?${params.toString()}` : ''}`);
   };
 
   const handleReject = (applicationId: number) => {
@@ -275,6 +287,7 @@ export default function CandidatePipeline() {
         appliedFor: app.job_title || "Unknown Position",
         appliedDate: formatAppliedDate(app.applied_at),
         appliedAt: app.applied_at,
+        cvFileTimestamp: app.cv_file_timestamp, // CV file timestamp stored at application time
         status: app.display_status || app.status,
         originalStatus: app.status,
         lastUploadFile: app.candidate.last_upload_file,
@@ -454,7 +467,25 @@ export default function CandidatePipeline() {
                     variant="outline"
                     size="sm"
                     className="w-full gap-2"
-                    onClick={() => handleViewProfile(applications.find((app) => app.application_id === candidate.applicationId)!)}
+                    onClick={() => {
+                      // Find the original application to verify candidate ID and get CV file timestamp
+                      const originalApp = applications.find((app) => app.application_id === candidate.applicationId);
+                      const verifiedCandidateId = originalApp?.candidate.id || candidate.candidateId;
+                      
+                      console.log('[View Profile Button] Clicked:', {
+                        cardCandidateId: candidate.candidateId,
+                        cardCandidateName: candidate.name,
+                        verifiedCandidateId,
+                        originalAppCandidateName: originalApp?.candidate.full_name,
+                        cvFileTimestamp: candidate.cvFileTimestamp,
+                        appliedAt: candidate.appliedAt,
+                        applicationId: candidate.applicationId,
+                        matches: candidate.candidateId === verifiedCandidateId,
+                      });
+                      
+                      // Use verified candidate ID and CV file timestamp (preferred) or applied_at (fallback)
+                      handleViewProfile(verifiedCandidateId, candidate.cvFileTimestamp, candidate.appliedAt);
+                    }}
                   >
                     <Eye className="w-4 h-4" />
                     View Profile

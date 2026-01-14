@@ -326,33 +326,44 @@ async def get_latest_cv(
 @router.get("/candidate/{candidate_id}", response_model=CVExtractionResponse)
 async def get_candidate_cv(
     candidate_id: str,
-    applied_at: Optional[str] = Query(None, description="ISO datetime to get CV version at application time"),
+    applied_at: Optional[str] = Query(None, description="ISO datetime to get CV version at application time (deprecated, use cv_file_timestamp)"),
+    cv_file_timestamp: Optional[str] = Query(None, description="CV file timestamp in YYYYMMDD_HHMMSS format (exact file to retrieve)"),
     recruiter=Depends(require_recruiter),
     supabase: Client = Depends(get_supabase),
 ):
     """
     Get parsed CV data for a specific candidate.
     
-    If applied_at is provided, returns the CV version that existed at that datetime.
-    Otherwise, returns the latest CV version.
+    Priority order:
+    1. If cv_file_timestamp is provided, retrieves the exact CV file with that timestamp
+    2. If applied_at is provided, returns the CV version that existed at that datetime (fallback)
+    3. Otherwise, returns the latest CV version
     
     This endpoint is for recruiters to view candidate CVs.
     Only accessible by authenticated recruiters.
     
     Args:
         candidate_id: Candidate user ID
-        applied_at: Optional ISO datetime string (e.g., "2024-01-15T10:30:00")
-                    to get CV version at time of application
+        cv_file_timestamp: Optional CV file timestamp (YYYYMMDD_HHMMSS format) - most precise
+        applied_at: Optional ISO datetime string (e.g., "2024-01-15T10:30:00") - fallback method
     """
-    logger.info(f"Getting CV for candidate {candidate_id} (requested by recruiter {recruiter['id']})")
+    logger.info(f"[CV API] Getting CV for candidate {candidate_id} (requested by recruiter {recruiter['id']}, cv_file_timestamp={cv_file_timestamp}, applied_at={applied_at})")
     
     try:
         # First check if files exist before calling get_parsed_cv
+        # Import retry utilities for storage operations
+        from app.services.cv.storage_service import _list_storage_files
+        from httpx import RemoteProtocolError, ConnectError, TimeoutException
+        
         try:
-            files = supabase.storage.from_(settings.SUPABASE_CV_BUCKET).list(
-                f"{candidate_id}/parsed"
+            files = _list_storage_files(supabase, f"{candidate_id}/parsed")
+            logger.info(f"[CV API] Storage list returned {len(files) if files else 0} files for candidate {candidate_id}")
+        except (RemoteProtocolError, ConnectError, TimeoutException, ConnectionError) as e:
+            logger.error(f"Supabase connection error listing files for candidate {candidate_id}: {str(e)}")
+            raise HTTPException(
+                status_code=503,
+                detail="CV storage service temporarily unavailable. Please try again.",
             )
-            logger.info(f"Storage list returned {len(files) if files else 0} files for candidate {candidate_id}")
         except Exception as list_error:
             logger.error(f"Error listing files for candidate {candidate_id}: {str(list_error)}")
             raise HTTPException(
@@ -367,12 +378,31 @@ async def get_candidate_cv(
                 detail="No parsed CV found for candidate",
             )
         
-        # Get CV data - use datetime if provided, otherwise get latest
+        # Get CV data - priority: cv_file_timestamp > applied_at > latest
         try:
-            if applied_at:
-                cv_data = get_parsed_cv_at_datetime(supabase, candidate_id, applied_at)
+            if cv_file_timestamp:
+                # Use exact timestamp to get specific CV file (most precise)
+                logger.info(f"[CV API] Fetching CV with exact timestamp {cv_file_timestamp} for candidate {candidate_id}")
+                cv_data = get_parsed_cv(supabase, candidate_id, timestamp=cv_file_timestamp)
+                cv_name = cv_data.get('identity', {}).get('full_name', 'Unknown') if isinstance(cv_data, dict) else 'Unknown'
+                logger.info(f"[CV API] Retrieved CV with timestamp {cv_file_timestamp} for candidate {candidate_id} - CV name: {cv_name}")
+            elif applied_at:
+                # Fallback to datetime-based lookup
+                try:
+                    cv_data = get_parsed_cv_at_datetime(supabase, candidate_id, applied_at)
+                    cv_name = cv_data.get('identity', {}).get('full_name', 'Unknown') if isinstance(cv_data, dict) else 'Unknown'
+                    logger.info(f"[CV API] Retrieved CV at application time {applied_at} for candidate {candidate_id} - CV name: {cv_name}")
+                except ValueError as ve:
+                    # If no CV exists at application time, fallback to latest CV
+                    logger.warning(f"[CV API] No CV found at application time {applied_at} for candidate {candidate_id}, using latest CV: {str(ve)}")
+                    cv_data = get_parsed_cv(supabase, candidate_id, timestamp=None)
+                    cv_name = cv_data.get('identity', {}).get('full_name', 'Unknown') if isinstance(cv_data, dict) else 'Unknown'
+                    logger.info(f"[CV API] Using latest CV for candidate {candidate_id} - CV name: {cv_name}")
             else:
+                # Get latest CV
                 cv_data = get_parsed_cv(supabase, candidate_id, timestamp=None)
+                cv_name = cv_data.get('identity', {}).get('full_name', 'Unknown') if isinstance(cv_data, dict) else 'Unknown'
+                logger.info(f"[CV API] Retrieved latest CV for candidate {candidate_id} - CV name: {cv_name}")
         except ValueError as ve:
             logger.error(f"get_parsed_cv raised ValueError for candidate {candidate_id}: {str(ve)}")
             raise HTTPException(
@@ -421,7 +451,10 @@ async def get_candidate_cv(
             )
             raw_path = f"{candidate_id}/raw/{raw_files_with_metadata[0][0]['name']}"
         
-        logger.info(f"Successfully retrieved CV for candidate {candidate_id}")
+        # Log the CV name being returned
+        final_cv_name = cv_data.get('identity', {}).get('full_name', 'Unknown') if isinstance(cv_data, dict) else 'Unknown'
+        logger.info(f"[CV API] Successfully retrieved CV for candidate {candidate_id} - CV name in response: {final_cv_name}")
+        
         return CVExtractionResponse(
             status="success",
             cv_data=cv_data,
