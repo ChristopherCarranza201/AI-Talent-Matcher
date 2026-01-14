@@ -197,3 +197,41 @@ export const getLatestCV = async (): Promise<CVExtractionResponse> => {
   const { data } = await apiClient.get<CVExtractionResponse>('/cv/latest');
   return data;
 };
+
+export const getCandidateCV = async (
+  candidateId: string,
+  appliedAt?: string,
+  cvFileTimestamp?: string
+): Promise<CVExtractionResponse> => {
+  const params = new URLSearchParams();
+  if (cvFileTimestamp) {
+    params.set('cv_file_timestamp', cvFileTimestamp);
+  } else if (appliedAt) {
+    params.set('applied_at', appliedAt);
+  }
+  const queryString = params.toString();
+  const { data } = await apiClient.get<CVExtractionResponse>(
+    `/cv/candidate/${candidateId}${queryString ? `?${queryString}` : ''}`
+  );
+  return data;
+};
+
+export const updateApplicationStartDate = async (
+  applicationId: number,
+  startDate: string
+): Promise<{ application_id: number; start_date: string }> => {
+  const { data } = await apiClient.patch<{ application_id: number; start_date: string }>(
+    `/applications/${applicationId}/start-date`,
+    { start_date: startDate }
+  );
+  return data;
+};
+
+export const removeHiredCandidate = async (
+  applicationId: number
+): Promise<{ status: string }> => {
+  const { data } = await apiClient.patch<{ status: string }>(
+    `/applications/${applicationId}/remove-hired`
+  );
+  return data;
+};
