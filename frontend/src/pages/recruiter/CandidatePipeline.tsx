@@ -37,6 +37,7 @@ export default function CandidatePipeline() {
   const { data: applications = [], isLoading } = useQuery<JobApplication[]>({
     queryKey: ["recruiterApplications"],
     queryFn: () => getAllRecruiterApplications(),
+    refetchInterval: 10000, // Auto-refresh every 10 seconds to show updated match scores
   });
 
   const updateStatusMutation = useMutation({
@@ -225,6 +226,14 @@ export default function CandidatePipeline() {
       // Extract name from CV (priority) or application
       const name = cvData?.cv_data?.identity?.full_name || app.candidate.full_name || "Unknown";
       
+      // Use match_score from application (0.0 to 1.0), convert to percentage (0-100)
+      // If match_score is not available yet (NULL), it means calculation is in progress
+      // If match_score is 0.0, it means calculated but score is 0%
+      // Ensure it's always a whole number (no decimals)
+      const matchScore = app.match_score !== undefined && app.match_score !== null 
+        ? Math.round(Number(app.match_score) * 100) 
+        : null; // null means not calculated yet, 0 means calculated as 0%
+      
       // Extract career/current role - from headline or latest experience role
       let career = "";
       if (cvData?.cv_data?.identity?.headline) {
@@ -282,7 +291,8 @@ export default function CandidatePipeline() {
         location,
         experienceYears,
         education,
-        score: 0, // Placeholder - match score will be calculated later
+        score: matchScore !== null ? matchScore : null, // null means calculating, number means calculated (0-100)
+        isCalculating: matchScore === null, // Track if score is still being calculated
         skills,
         appliedFor: app.job_title || "Unknown Position",
         appliedDate: formatAppliedDate(app.applied_at),
@@ -391,7 +401,23 @@ export default function CandidatePipeline() {
               <div className="flex flex-col lg:flex-row gap-4">
                 {/* Match Score - Left Section */}
                 <div className="flex lg:flex-col items-center justify-center">
-                  <MatchScore score={candidate.score} size="md" showLabel={true} />
+                  {candidate.isCalculating ? (
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="w-16 h-16 flex items-center justify-center text-muted-foreground">
+                        <span className="text-xs">Calculating...</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground font-medium">Match Score</span>
+                    </div>
+                  ) : candidate.score !== null ? (
+                    <MatchScore score={candidate.score} size="md" showLabel={true} />
+                  ) : (
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="w-16 h-16 flex items-center justify-center text-muted-foreground">
+                        <span className="text-xs">N/A</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground font-medium">Match Score</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Candidate Info - Center Section */}

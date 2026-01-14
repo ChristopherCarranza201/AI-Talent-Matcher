@@ -35,15 +35,15 @@ import { getAllRecruiterApplications, updateApplicationStatus, getCandidateCV } 
 import { toast } from "sonner";
 import type { JobApplication, CVExtractionResponse } from "@/types/api";
 
-type ApplicationStatus = "applied" | "reviewing" | "shortlisted" | "interview" | "rejected" | "hired";
+type ApplicationStatus = "applied" | "reviewing" | "shortlisted" | "rejected" | "hired" | "withdrawn";
 
 const statusOptions: { value: ApplicationStatus; label: string }[] = [
   { value: "applied", label: "Applied" },
   { value: "reviewing", label: "Under Review" },
   { value: "shortlisted", label: "Shortlisted" },
-  { value: "interview", label: "Interview" },
   { value: "rejected", label: "Rejected" },
   { value: "hired", label: "Hired" },
+  { value: "withdrawn", label: "Withdrawn" },
 ];
 
 export default function ManageApplications() {
@@ -57,6 +57,7 @@ export default function ManageApplications() {
   const { data: allApplications = [], isLoading } = useQuery<JobApplication[]>({
     queryKey: ["recruiterApplications"],
     queryFn: () => getAllRecruiterApplications(),
+    refetchInterval: 10000, // Auto-refresh every 10 seconds to show updated match scores
   });
 
   // Filter to show only accepted candidates (exclude rejected and withdrawn)
@@ -122,12 +123,12 @@ export default function ManageApplications() {
         return "bg-warning/10 text-warning border-warning/30";
       case "shortlisted":
         return "bg-primary/10 text-primary border-primary/30";
-      case "interview":
-        return "bg-success/10 text-success border-success/30";
       case "rejected":
         return "bg-muted text-muted-foreground";
       case "hired":
         return "bg-success/10 text-success border-success/30";
+      case "withdrawn":
+        return "bg-muted/50 text-muted-foreground border-muted/30";
       default:
         return "";
     }
@@ -164,17 +165,26 @@ export default function ManageApplications() {
     }
   };
 
-  // Enhance applications with CV names
+  // Enhance applications with CV names and match scores
   const applicationsWithCVNames = useMemo(() => {
     return applications.map((app) => {
       const cvData = cvDataMap.get(app.candidate.id);
       const cvName = cvData?.cv_data?.identity?.full_name;
       // Use CV name if available, otherwise fallback to profile name
       const displayName = cvName || app.candidate.full_name || "Unknown";
+      
+      // Extract match_score from application (0.0 to 1.0), convert to percentage (0-100)
+      // If match_score is not available yet (NULL), it means calculation is in progress
+      const matchScore = app.match_score !== undefined && app.match_score !== null 
+        ? Math.round(Number(app.match_score) * 100) 
+        : null; // null means calculating, number means calculated (0-100)
+      
       return {
         ...app,
         displayName,
         cvName,
+        matchScore,
+        isCalculating: matchScore === null,
       };
     });
   }, [applications, cvDataMap]);
@@ -239,9 +249,9 @@ export default function ManageApplications() {
                 </div>
                 <div>
                   <p className="text-2xl font-bold">
-                    {applications.filter((a) => a.status === "interview").length}
+                    {applications.filter((a) => a.status === "shortlisted").length}
                   </p>
-                  <p className="text-xs text-muted-foreground">Interview</p>
+                  <p className="text-xs text-muted-foreground">Shortlisted</p>
                 </div>
               </div>
             </CardContent>
@@ -346,7 +356,21 @@ export default function ManageApplications() {
                       <p className="font-medium">{app.job_title || "Unknown Position"}</p>
                     </TableCell>
                     <TableCell>
-                      <MatchScore score={0} size="sm" showLabel={false} />
+                      {app.isCalculating ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <div className="w-12 h-12 flex items-center justify-center text-muted-foreground">
+                            <span className="text-xs">Calculating...</span>
+                          </div>
+                        </div>
+                      ) : app.matchScore !== null ? (
+                        <MatchScore score={app.matchScore} size="sm" showLabel={false} />
+                      ) : (
+                        <div className="flex flex-col items-center gap-1">
+                          <div className="w-12 h-12 flex items-center justify-center text-muted-foreground">
+                            <span className="text-xs">N/A</span>
+                          </div>
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1 text-sm text-muted-foreground">

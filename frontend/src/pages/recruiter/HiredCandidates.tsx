@@ -41,6 +41,7 @@ export default function HiredCandidates() {
   const { data: allApplications = [], isLoading } = useQuery<JobApplication[]>({
     queryKey: ["recruiterApplications"],
     queryFn: () => getAllRecruiterApplications(),
+    refetchInterval: 10000, // Auto-refresh every 10 seconds to show updated match scores
   });
 
   // Filter to show only hired candidates
@@ -85,7 +86,7 @@ export default function HiredCandidates() {
     return map;
   }, [candidateIds, cvQueries]);
 
-  // Enhance applications with CV data
+  // Enhance applications with CV data and match scores
   const candidates = useMemo(() => {
     return hiredApplications.map((app) => {
       const cvData = cvDataMap.get(app.candidate.id);
@@ -117,6 +118,12 @@ export default function HiredCandidates() {
       
       // Determine status: "confirmed" if start_date exists, otherwise "pending"
       const status = startDate ? "confirmed" : "pending";
+      
+      // Extract match_score from application (0.0 to 1.0), convert to percentage (0-100)
+      // If match_score is not available yet (NULL), it means calculation is in progress
+      const matchScore = app.match_score !== undefined && app.match_score !== null 
+        ? Math.round(Number(app.match_score) * 100) 
+        : null; // null means calculating, number means calculated (0-100)
 
       return {
         ...app,
@@ -128,6 +135,8 @@ export default function HiredCandidates() {
         education: education[0] ? `${education[0].degree}${education[0].institution ? `, ${education[0].institution}` : ""}` : "No education listed",
         startDate,
         status,
+        matchScore,
+        isCalculating: matchScore === null,
       };
     });
   }, [hiredApplications, cvDataMap]);
@@ -289,7 +298,23 @@ export default function HiredCandidates() {
                 <div className="flex flex-col lg:flex-row gap-4">
                   {/* Match Score */}
                   <div className="flex lg:flex-col items-center lg:items-center gap-3 lg:gap-1">
-                    <MatchScore score={0} size="md" />
+                    {candidate.isCalculating ? (
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="w-16 h-16 flex items-center justify-center text-muted-foreground">
+                          <span className="text-xs">Calculating...</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground font-medium">Match Score</span>
+                      </div>
+                    ) : candidate.matchScore !== null ? (
+                      <MatchScore score={candidate.matchScore} size="md" showLabel={true} />
+                    ) : (
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="w-16 h-16 flex items-center justify-center text-muted-foreground">
+                          <span className="text-xs">N/A</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground font-medium">Match Score</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Candidate Info */}

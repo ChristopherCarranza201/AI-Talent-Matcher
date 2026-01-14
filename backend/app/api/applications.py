@@ -24,6 +24,10 @@ from app.api.deps import get_current_user, require_recruiter
 from app.db.supabase import get_supabase
 from app.schemas.application import ApplicationCreate, StartDateUpdate
 from app.services.cv.storage_service import get_latest_cv_file_info
+from app.services.cv.match_service import calculate_match_score
+from app.core.config import settings
+from supabase import create_client
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -146,9 +150,10 @@ def apply_to_job(
     # ------------------------------------------------------------------
     try:
         # Use normal query instead of maybe_single() to avoid 406 errors with multiple filters
+        # Include match_score to check if calculation is needed
         existing_app_response = (
             supabase.table("applications")
-            .select("id, status")
+            .select("id, status, match_score")
             .eq("candidate_profile_id", user_id)
             .eq("job_position_id", payload.job_position_id)
             .limit(1)
@@ -225,6 +230,72 @@ def apply_to_job(
                 if full_app_response and full_app_response.data:
                     return full_app_response.data
                 return app_data
+            
+            # For existing applications, check if match_score exists before triggering calculation
+            # Only trigger if match_score is NULL (to avoid wasting tokens on recalculation)
+            existing_match_score = app_data.get("match_score")
+            if existing_match_score is None and cv_file_timestamp:
+                # Trigger match score calculation for existing application that doesn't have a score yet
+                application_id = app_data["id"]
+                job_position_id = payload.job_position_id
+                
+                def calculate_match_in_background():
+                    """Background task to calculate match score for existing application"""
+                    try:
+                        logger.info(f"Starting background match score calculation for existing application {application_id}")
+                        
+                        supabase_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+                        
+                        # Double-check that match_score still doesn't exist
+                        app_check = (
+                            supabase_client.table("applications")
+                            .select("match_score")
+                            .eq("id", application_id)
+                            .maybe_single()
+                            .execute()
+                        )
+                        
+                        if app_check.data and app_check.data.get("match_score") is not None:
+                            logger.info(f"Match score already exists for application {application_id}, skipping calculation")
+                            return
+                        
+                        job_response = (
+                            supabase_client.table("job_position")
+                            .select("id, job_title, job_description")
+                            .eq("id", job_position_id)
+                            .maybe_single()
+                            .execute()
+                        )
+                        
+                        if not job_response.data:
+                            logger.warning(f"Job {job_position_id} not found for match calculation")
+                            return
+                        
+                        job_title = job_response.data.get("job_title", "")
+                        job_description = job_response.data.get("job_description")
+                        
+                        match_result = calculate_match_score(
+                            user_id=user_id,
+                            job_position_id=job_position_id,
+                            job_title=job_title,
+                            job_description=job_description,
+                            cv_timestamp=cv_file_timestamp,
+                            supabase=supabase_client,
+                        )
+                        
+                        final_score = match_result.get("final_score", 0.0)
+                        if final_score is not None:
+                            supabase_client.table("applications").update({
+                                "match_score": final_score
+                            }).eq("id", application_id).execute()
+                            
+                            logger.info(f"Match score {final_score} saved for existing application {application_id}")
+                    except Exception as e:
+                        logger.error(f"Error calculating match score in background: {e}", exc_info=True)
+                
+                thread = threading.Thread(target=calculate_match_in_background, daemon=True)
+                thread.start()
+                logger.info(f"Background match score calculation started for existing application {application_id}")
 
             logger.info(f"Updating application with data: {update_data}")
             response = (
@@ -342,7 +413,86 @@ def apply_to_job(
 
     # response.data is a list, get the first element
     logger.info(f"Application successfully created/updated. Response data length: {len(response.data)}")
-    return response.data[0]
+    application_data = response.data[0]
+    
+    # Trigger match score calculation in background (only for new applications)
+    # Only calculate if match_score doesn't already exist (avoid wasting tokens on recalculation)
+    if existing_app_data is None:
+        application_id = application_data.get("id")
+        job_position_id = payload.job_position_id
+        
+        # Check if match_score already exists to avoid unnecessary recalculation
+        existing_match_score = application_data.get("match_score")
+        
+        if existing_match_score is None:
+            def calculate_match_in_background():
+                """Background task to calculate match score - only runs if score doesn't exist"""
+                try:
+                    logger.info(f"Starting background match score calculation for application {application_id}")
+                    
+                    # Create new Supabase client for background thread
+                    supabase_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+                    
+                    # Double-check that match_score still doesn't exist (race condition protection)
+                    app_check = (
+                        supabase_client.table("applications")
+                        .select("match_score")
+                        .eq("id", application_id)
+                        .maybe_single()
+                        .execute()
+                    )
+                    
+                    if app_check.data and app_check.data.get("match_score") is not None:
+                        logger.info(f"Match score already exists for application {application_id}, skipping calculation")
+                        return
+                    
+                    job_response = (
+                        supabase_client.table("job_position")
+                        .select("id, job_title, job_description")
+                        .eq("id", job_position_id)
+                        .maybe_single()
+                        .execute()
+                    )
+                    
+                    if not job_response.data:
+                        logger.warning(f"Job {job_position_id} not found for match calculation")
+                        return
+                    
+                    job_title = job_response.data.get("job_title", "")
+                    job_description = job_response.data.get("job_description")
+                    
+                    # Calculate match score (this uses LLM tokens)
+                    match_result = calculate_match_score(
+                        user_id=user_id,
+                        job_position_id=job_position_id,
+                        job_title=job_title,
+                        job_description=job_description,
+                        cv_timestamp=cv_file_timestamp,
+                        supabase=supabase_client,
+                    )
+                    
+                    # Update application with match score
+                    final_score = match_result.get("final_score", 0.0)
+                    if final_score is not None:
+                        supabase_client.table("applications").update({
+                            "match_score": final_score
+                        }).eq("id", application_id).execute()
+                        
+                        logger.info(f"Match score {final_score} saved for application {application_id}")
+                    else:
+                        logger.warning(f"No final_score in match result for application {application_id}")
+                        
+                except Exception as e:
+                    logger.error(f"Error calculating match score in background: {e}", exc_info=True)
+            
+            # Start background thread
+            thread = threading.Thread(target=calculate_match_in_background, daemon=True)
+            thread.start()
+            logger.info(f"Background match score calculation started for application {application_data.get('id')}")
+        else:
+            logger.info(f"Match score already exists ({existing_match_score}) for application {application_id}, skipping calculation")
+    
+    return application_data
 
 
 @router.get("/me")
@@ -775,6 +925,7 @@ def get_all_applications_for_recruiter(
             job_ids = [job_id]  # Filter to specific job if provided
         
         # Fetch applications for these jobs
+        # Include candidate_profile_id for match score calculation
         response = (
             supabase.table("applications")
             .select(
@@ -784,9 +935,11 @@ def get_all_applications_for_recruiter(
                 applied_at,
                 cover_letter,
                 job_position_id,
+                candidate_profile_id,
                 cv_file_timestamp,
                 cv_file_path,
                 start_date,
+                match_score,
                 candidate_profiles (
                     profile_id,
                     location,
@@ -810,6 +963,135 @@ def get_all_applications_for_recruiter(
         )
 
     applications = []
+    
+    # Trigger match score calculation for applications without scores (background task)
+    # This ensures ALL candidates in the pipeline get match analysis
+    applications_needing_scores = []
+    total_applications = len(response.data or [])
+    applications_with_scores = 0
+    
+    for row in response.data or []:
+        match_score = row.get("match_score")
+        cv_file_timestamp = row.get("cv_file_timestamp")
+        candidate_profile_id = row.get("candidate_profile_id")
+        
+        if match_score is not None:
+            applications_with_scores += 1
+        elif candidate_profile_id:
+            # Application needs match score calculation
+            # If cv_file_timestamp is missing, we'll use the latest CV available for the candidate
+            applications_needing_scores.append({
+                "application_id": row["id"],
+                "candidate_profile_id": candidate_profile_id,
+                "job_position_id": row.get("job_position_id"),
+                "cv_file_timestamp": cv_file_timestamp,  # Can be None - will use latest CV
+            })
+        else:
+            logger.warning(f"Application {row.get('id')} has no candidate_profile_id - cannot calculate")
+    
+    logger.info(f"Match score status: {applications_with_scores} with scores, {len(applications_needing_scores)} need calculation out of {total_applications} total applications")
+    
+    # Trigger background calculations for applications without scores
+    if applications_needing_scores:
+        logger.info(f"Found {len(applications_needing_scores)} applications without match scores, triggering background calculations")
+        
+        def calculate_missing_scores():
+            """Background task to calculate match scores for applications that don't have them"""
+            try:
+                supabase_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+                
+                total_to_process = len(applications_needing_scores)
+                processed = 0
+                skipped = 0
+                errors = 0
+                
+                logger.info(f"Starting background calculation for {total_to_process} applications")
+                
+                for idx, app_info in enumerate(applications_needing_scores, 1):
+                    try:
+                        application_id = app_info["application_id"]
+                        candidate_profile_id = app_info["candidate_profile_id"]
+                        job_position_id = app_info["job_position_id"]
+                        cv_file_timestamp = app_info["cv_file_timestamp"]
+                        
+                        logger.info(f"[{idx}/{total_to_process}] Processing application {application_id} (candidate {candidate_profile_id}, job {job_position_id})")
+                        
+                        # Double-check that match_score still doesn't exist
+                        app_check = (
+                            supabase_client.table("applications")
+                            .select("match_score")
+                            .eq("id", application_id)
+                            .maybe_single()
+                            .execute()
+                        )
+                        
+                        if app_check.data and app_check.data.get("match_score") is not None:
+                            logger.info(f"Application {application_id} already has match_score, skipping")
+                            skipped += 1
+                            continue
+                        
+                        # Get job details
+                        job_response = (
+                            supabase_client.table("job_position")
+                            .select("id, job_title, job_description")
+                            .eq("id", job_position_id)
+                            .maybe_single()
+                            .execute()
+                        )
+                        
+                        if not job_response.data:
+                            logger.warning(f"Job {job_position_id} not found for match calculation (application {application_id})")
+                            errors += 1
+                            continue
+                        
+                        job_title = job_response.data.get("job_title", "")
+                        job_description = job_response.data.get("job_description")
+                        
+                        # If cv_file_timestamp is None, we'll use the latest CV available
+                        # calculate_match_score will handle None timestamp by using the latest CV
+                        if cv_file_timestamp:
+                            logger.info(f"Calculating match score for application {application_id} (candidate {candidate_profile_id}, job {job_position_id} - {job_title}) using CV timestamp {cv_file_timestamp}")
+                        else:
+                            logger.info(f"Calculating match score for application {application_id} (candidate {candidate_profile_id}, job {job_position_id} - {job_title}) using latest CV (no timestamp stored)")
+                        
+                        # Calculate match score
+                        # If cv_timestamp is None, calculate_match_score will use the latest CV
+                        match_result = calculate_match_score(
+                            user_id=candidate_profile_id,
+                            job_position_id=job_position_id,
+                            job_title=job_title,
+                            job_description=job_description,
+                            cv_timestamp=cv_file_timestamp,  # Can be None - will use latest CV
+                            supabase=supabase_client,
+                        )
+                        
+                        # Update application with match score
+                        final_score = match_result.get("final_score", 0.0)
+                        if final_score is not None:
+                            supabase_client.table("applications").update({
+                                "match_score": final_score
+                            }).eq("id", application_id).execute()
+                            
+                            processed += 1
+                            logger.info(f"✓ Match score {final_score} saved for application {application_id} ({processed}/{total_to_process} completed)")
+                        else:
+                            logger.warning(f"No final_score in match result for application {application_id}")
+                            errors += 1
+                            
+                    except Exception as e:
+                        errors += 1
+                        logger.error(f"Error calculating match score for application {app_info.get('application_id')}: {e}", exc_info=True)
+                        continue
+                
+                logger.info(f"Background calculation complete: {processed} processed, {skipped} skipped, {errors} errors out of {total_to_process} total")
+                        
+            except Exception as e:
+                logger.error(f"Error in calculate_missing_scores background task: {e}", exc_info=True)
+        
+        # Start background thread to calculate missing scores
+        thread = threading.Thread(target=calculate_missing_scores, daemon=True)
+        thread.start()
+        logger.info(f"Background match score calculation thread started for {len(applications_needing_scores)} applications")
 
     for row in response.data or []:
         candidate_profile = row.get("candidate_profiles") or {}
@@ -837,6 +1119,7 @@ def get_all_applications_for_recruiter(
                 "cv_file_timestamp": row.get("cv_file_timestamp"),
                 "cv_file_path": row.get("cv_file_path"),
                 "start_date": row.get("start_date"),
+                "match_score": row.get("match_score"),
                 "candidate": {
                     "id": profile.get("id"),
                     "full_name": profile.get("full_name"),
@@ -897,6 +1180,8 @@ def get_applications_for_job(
                 cover_letter,
                 cv_file_timestamp,
                 cv_file_path,
+                start_date,
+                match_score,
                 candidate_profiles (
                     profile_id,
                     location,
@@ -944,6 +1229,7 @@ def get_applications_for_job(
                 "cv_file_timestamp": row.get("cv_file_timestamp"),
                 "cv_file_path": row.get("cv_file_path"),
                 "start_date": row.get("start_date"),
+                "match_score": row.get("match_score"),
                 "candidate": {
                     "id": profile.get("id"),
                     "full_name": profile.get("full_name"),

@@ -17,8 +17,10 @@ from app.services.cv.storage_service import (
     get_parsed_cv,
     get_parsed_cv_at_datetime,
 )
+from app.services.cv.match_service import calculate_match_score
 from app.schemas.cv.extraction import CVExtractionResponse
 from app.schemas.cv.update import CVUpdateRequest, CVUpdateResponse
+from app.schemas.cv.match import MatchAnalysisRequest, MatchAnalysisResponse
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -480,4 +482,59 @@ async def get_candidate_cv(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve CV: {error_message}",
+        )
+
+
+@router.post("/match", response_model=MatchAnalysisResponse)
+async def analyze_match(
+    request: MatchAnalysisRequest,
+    user_id: str = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    Calculate match score between candidate's CV and a job position.
+    
+    This endpoint runs match analysis agents to calculate how well
+    the candidate's CV matches the job requirements.
+    """
+    logger.info(f"Match analysis request: user_id={user_id}, job_position_id={request.job_position_id}")
+    
+    try:
+        # Get job position details
+        job_response = (
+            supabase.table("job_position")
+            .select("id, job_title, job_description")
+            .eq("id", request.job_position_id)
+            .maybe_single()
+            .execute()
+        )
+        
+        if not job_response.data:
+            raise HTTPException(
+                status_code=404,
+                detail="Job position not found",
+            )
+        
+        job_title = job_response.data.get("job_title", "")
+        job_description = job_response.data.get("job_description")
+        
+        # Calculate match score
+        match_result = calculate_match_score(
+            user_id=user_id,
+            job_position_id=request.job_position_id,
+            job_title=job_title,
+            job_description=job_description,
+            cv_timestamp=request.cv_timestamp,
+            supabase=supabase,
+        )
+        
+        return MatchAnalysisResponse(**match_result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Match analysis error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to calculate match score: {str(e)}",
         )

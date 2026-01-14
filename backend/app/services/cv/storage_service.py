@@ -522,3 +522,63 @@ def update_parsed_cv(
     
     return file_path
 
+
+def store_match_result(
+    supabase: Client,
+    user_id: str,
+    match_data: dict,
+    cv_name: str,
+    job_position_id: int,
+    job_title: str,
+    timestamp: str
+) -> str:
+    """
+    Store match analysis result to Supabase Storage.
+    
+    Each match result is uniquely identified by (user_id, job_position_id) combination.
+    This ensures that the same candidate applying to different jobs gets separate analyses.
+    
+    Args:
+        supabase: Supabase client
+        user_id: User ID (candidate profile ID)
+        match_data: Match analysis result dictionary
+        cv_name: Original CV filename (without extension)
+        job_position_id: Job position ID (ensures uniqueness per job)
+        job_title: Job title/position name (for readability in filename)
+        timestamp: Timestamp string (YYYYMMDD_HHMMSS)
+        
+    Returns:
+        Storage path
+    """
+    # Include job_position_id in path to ensure uniqueness per job position
+    # Format: {user_id}/match_results/job_{job_position_id}_{timestamp}_{cv_name}_{job_slug}.json
+    job_slug = job_title.lower().replace(" ", "_").replace("/", "_")[:30]
+    storage_path = f"{user_id}/match_results/job_{job_position_id}_{timestamp}_{cv_name}_{job_slug}.json"
+    json_content = json.dumps(match_data, indent=2, ensure_ascii=False).encode('utf-8')
+    
+    try:
+        supabase.storage.from_(settings.SUPABASE_CV_BUCKET).upload(
+            storage_path,
+            json_content,
+            file_options={"content-type": "application/json", "upsert": "false"}
+        )
+    except Exception as e:
+        error_msg = str(e)
+        # If JSON MIME type is not allowed, try without content-type
+        if "application/json is not supported" in error_msg or "mime type" in error_msg.lower():
+            logger.warning(
+                "JSON MIME type not allowed in bucket. "
+                "Trying upload without content-type. "
+                "Please add 'application/json' to bucket allowed MIME types."
+            )
+            # Try without content-type specification
+            supabase.storage.from_(settings.SUPABASE_CV_BUCKET).upload(
+                storage_path,
+                json_content,
+                file_options={"upsert": "false"}
+            )
+        else:
+            raise
+    
+    logger.info(f"Match result stored at: {storage_path}")
+    return storage_path
