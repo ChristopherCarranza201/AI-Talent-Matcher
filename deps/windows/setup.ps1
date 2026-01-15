@@ -16,11 +16,37 @@ Write-Host "[INFO] Setting up AI Talent Matcher project with UV..." -ForegroundC
 # Step 1: Check Python version
 Write-Host "`n[INFO] Checking Python version..." -ForegroundColor Blue
 try {
-    $pythonVersion = python --version 2>&1
-    Write-Host "[OK] $pythonVersion detected" -ForegroundColor Green
+    $pythonVersionOutput = python --version 2>&1
+    $pythonVersion = ($pythonVersionOutput -replace 'Python ', '').Trim()
+    Write-Host "[OK] Python $pythonVersion detected" -ForegroundColor Green
+    
+    # Parse version to check compatibility
+    $versionParts = $pythonVersion -split '\.'
+    $major = [int]$versionParts[0]
+    $minor = [int]$versionParts[1]
+    
+    # Check if version is supported (3.10 - 3.12)
+    if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 10)) {
+        Write-Host "[ERROR] Python 3.10 or higher is required. You have Python $pythonVersion" -ForegroundColor Red
+        Write-Host "   Please install Python 3.10, 3.11, or 3.12 from: https://www.python.org/downloads/" -ForegroundColor Yellow
+        Write-Host "   Note: Python 3.13+ may have compatibility issues with some C extensions." -ForegroundColor Yellow
+        exit 1
+    }
+    
+    # Store the detected Python version for later use
+    $script:detectedPythonVersion = $pythonVersion
+    $script:detectedMajor = $major
+    $script:detectedMinor = $minor
+    
+    if ($major -gt 3 -or ($major -eq 3 -and $minor -gt 12)) {
+        Write-Host "[WARNING] Python $pythonVersion detected. This project is tested with Python 3.10-3.12." -ForegroundColor Yellow
+        Write-Host "   Python 3.13+ may have compatibility issues with C extensions (e.g., pyroaring)." -ForegroundColor Yellow
+        Write-Host "   UV will try to find and use Python 3.11 or 3.12 for the virtual environment." -ForegroundColor Blue
+    }
 } catch {
-    Write-Host "[ERROR] Python is not installed. Please install Python 3.10 or higher." -ForegroundColor Yellow
+    Write-Host "[ERROR] Python is not installed. Please install Python 3.10, 3.11, or 3.12." -ForegroundColor Yellow
     Write-Host "   Download from: https://www.python.org/downloads/" -ForegroundColor Yellow
+    Write-Host "   Recommended: Python 3.11 or 3.12 for best compatibility" -ForegroundColor Yellow
     exit 1
 }
 
@@ -55,11 +81,72 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Write-Host "[OK] UV is already installed" -ForegroundColor Green
 }
 
-# Step 3: Create virtual environment with UV
-Write-Host "`n[INFO] Creating virtual environment with UV..." -ForegroundColor Blue
-uv venv
+# Step 3: Determine Python version for virtual environment
+Write-Host "`n[INFO] Preparing virtual environment..." -ForegroundColor Blue
+$pythonVersionForVenv = $null
 
-# Step 4: Activate virtual environment
+# Check if detected Python version is compatible (3.10-3.12)
+if ($script:detectedMajor -eq 3 -and $script:detectedMinor -ge 10 -and $script:detectedMinor -le 12) {
+    # Use the detected Python version
+    $pythonVersionForVenv = $script:detectedPythonVersion
+    Write-Host "[OK] Using Python $pythonVersionForVenv for virtual environment" -ForegroundColor Green
+} else {
+    # Try to find a compatible Python version using UV
+    Write-Host "[INFO] Detected Python version may have compatibility issues. Checking for Python 3.11 or 3.12..." -ForegroundColor Blue
+    
+    # Preferred versions in order of preference
+    $preferredVersions = @("3.12", "3.11", "3.10")
+    
+    foreach ($prefVersion in $preferredVersions) {
+        # Try to find or install Python version via UV
+        Write-Host "   Checking for Python $prefVersion..." -ForegroundColor Cyan
+        $pythonCheck = uv python find $prefVersion 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            $pythonVersionForVenv = $prefVersion
+            Write-Host "[OK] Found Python $prefVersion via UV" -ForegroundColor Green
+            break
+        }
+    }
+    
+    if (-not $pythonVersionForVenv) {
+        # Try to install Python 3.12 via UV
+        Write-Host "[INFO] Attempting to install Python 3.12 via UV..." -ForegroundColor Blue
+        try {
+            uv python install 3.12 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                $pythonVersionForVenv = "3.12"
+                Write-Host "[OK] Installed Python 3.12 via UV" -ForegroundColor Green
+            } else {
+                Write-Host "[WARNING] Could not install Python 3.12 via UV automatically" -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "[WARNING] Could not install Python 3.12 via UV automatically" -ForegroundColor Yellow
+        }
+    }
+    
+    if (-not $pythonVersionForVenv) {
+        Write-Host "[WARNING] No compatible Python version found automatically." -ForegroundColor Yellow
+        Write-Host "   The virtual environment will use your system Python ($script:detectedPythonVersion)." -ForegroundColor Yellow
+        Write-Host "   If you encounter build errors, please install Python 3.11 or 3.12 manually:" -ForegroundColor Yellow
+        Write-Host "   - Download from: https://www.python.org/downloads/" -ForegroundColor Yellow
+        Write-Host "   - Or run manually: uv python install 3.12" -ForegroundColor Yellow
+        $pythonVersionForVenv = $script:detectedPythonVersion
+    }
+}
+
+# Step 4: Create virtual environment with UV
+Write-Host "`n[INFO] Creating virtual environment with UV..." -ForegroundColor Blue
+if ($pythonVersionForVenv -and ($pythonVersionForVenv -ne $script:detectedPythonVersion)) {
+    Write-Host "   Using Python $pythonVersionForVenv (via UV) instead of system Python $script:detectedPythonVersion" -ForegroundColor Cyan
+    uv venv --python $pythonVersionForVenv
+} elseif ($pythonVersionForVenv) {
+    Write-Host "   Using Python $pythonVersionForVenv for virtual environment" -ForegroundColor Cyan
+    uv venv --python $pythonVersionForVenv
+} else {
+    uv venv
+}
+
+# Step 5: Activate virtual environment
 Write-Host "`n[INFO] Activating virtual environment..." -ForegroundColor Blue
 & .\.venv\Scripts\Activate.ps1
 
@@ -69,30 +156,74 @@ Write-Host "`n[INFO] Activating virtual environment..." -ForegroundColor Blue
 $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $projectRoot
 
+Write-Host "`n[INFO] Installing dependencies..." -ForegroundColor Blue
+$installSuccess = $false
+
 if ($UsePyProject) {
-    Write-Host "`n[INFO] Installing dependencies from pyproject.toml..." -ForegroundColor Blue
     Write-Host "   (Alternative method - using pyproject.toml)" -ForegroundColor Cyan
     # Install from pyproject.toml
     # Note: pyproject.toml is in deps/ folder
     # We need to change to deps directory or specify the path
     Set-Location deps
-    uv pip install -e .
+    try {
+        uv pip install -e .
+        $installSuccess = $true
+    } catch {
+        Write-Host "[ERROR] Failed to install dependencies from pyproject.toml" -ForegroundColor Red
+        Write-Host "   Error: $_" -ForegroundColor Red
+        $installSuccess = $false
+    }
     Set-Location ..
 } else {
-    Write-Host "`n[INFO] Installing dependencies from requirements.txt..." -ForegroundColor Blue
     Write-Host "   (Default method - using requirements.txt)" -ForegroundColor Cyan
     # Default: use requirements.txt for dependency installation
     # Note: requirements.txt is in deps/ folder
-    uv pip install -r deps/requirements.txt
+    try {
+        uv pip install -r deps/requirements.txt
+        if ($LASTEXITCODE -eq 0) {
+            $installSuccess = $true
+        } else {
+            $installSuccess = $false
+        }
+    } catch {
+        Write-Host "[ERROR] Failed to install dependencies" -ForegroundColor Red
+        Write-Host "   Error: $_" -ForegroundColor Red
+        $installSuccess = $false
+    }
 }
 
-# Step 6: Verify Python installation
+if (-not $installSuccess) {
+    Write-Host "`n[ERROR] Dependency installation failed!" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Common causes:" -ForegroundColor Yellow
+    Write-Host "   1. Python version too new (3.13+) - Use Python 3.11 or 3.12 instead" -ForegroundColor Yellow
+    Write-Host "   2. Missing C++ build tools (Visual Studio Build Tools)" -ForegroundColor Yellow
+    Write-Host "   3. Network issues or package registry problems" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Solutions:" -ForegroundColor Cyan
+    Write-Host "   - If using Python 3.13+, downgrade to Python 3.11 or 3.12" -ForegroundColor Cyan
+    Write-Host "   - Install Visual Studio Build Tools: https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022" -ForegroundColor Cyan
+    Write-Host "   - Install the 'Desktop development with C++' workload" -ForegroundColor Cyan
+    Write-Host "   - Try again: uv pip install -r deps/requirements.txt" -ForegroundColor Cyan
+    exit 1
+}
+
+# Step 7: Verify Python installation
 Write-Host "`n[INFO] Verifying Python installation..." -ForegroundColor Blue
 try {
-    python -c "import fastapi; import uvicorn; print('[OK] Core dependencies installed successfully')"
-    Write-Host "[OK] Verification successful" -ForegroundColor Green
+    $verifyOutput = python -c "import fastapi; import uvicorn; print('[OK] Core dependencies installed successfully')" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[OK] Verification successful" -ForegroundColor Green
+    } else {
+        Write-Host "[ERROR] Verification failed. Some dependencies may be missing." -ForegroundColor Red
+        Write-Host "   Output: $verifyOutput" -ForegroundColor Yellow
+        Write-Host "   Try running: uv pip install -r deps/requirements.txt manually" -ForegroundColor Yellow
+        exit 1
+    }
 } catch {
-    Write-Host "[ERROR] Verification failed. Some dependencies may be missing." -ForegroundColor Yellow
+    Write-Host "[ERROR] Verification failed. Some dependencies may be missing." -ForegroundColor Red
+    Write-Host "   Error: $_" -ForegroundColor Yellow
+    Write-Host "   Try running: uv pip install -r deps/requirements.txt manually" -ForegroundColor Yellow
     exit 1
 }
 
@@ -105,7 +236,7 @@ try {
     Write-Host "[WARNING] Failed to upgrade pip. Continuing anyway..." -ForegroundColor Yellow
 }
 
-# Step 6.6: Download SpaCy model (required for match score calculation)
+# Step 7.6: Download SpaCy model (required for match score calculation)
 Write-Host "`n[INFO] Downloading SpaCy language model (en_core_web_sm)..." -ForegroundColor Blue
 Write-Host "   This is required for match score calculation and may take a few minutes..." -ForegroundColor Cyan
 Write-Host "   Note: SpaCy models are downloaded separately from Python packages." -ForegroundColor Cyan
@@ -143,7 +274,7 @@ try {
     Write-Host "   Install Node.js 22.12.0 or higher from: https://nodejs.org/" -ForegroundColor Yellow
 }
 
-# Step 8: Setup frontend if Node.js is available
+# Step 9: Setup frontend if Node.js is available
 if ($frontendSetup) {
     Write-Host "`n[INFO] Setting up frontend dependencies..." -ForegroundColor Blue
     Push-Location frontend

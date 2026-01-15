@@ -26,7 +26,9 @@ Intelligent technical recruitment platform that automates candidate evaluation a
 
 Before starting, make sure you have installed:
 
-- **Python 3.10 or higher** - [Download Python](https://www.python.org/downloads/)
+- **Python 3.10, 3.11, or 3.12** - [Download Python](https://www.python.org/downloads/)
+  - ⚠️ **Note**: Python 3.13+ may have compatibility issues with C extensions (e.g., pyroaring). 
+  - ✅ **Recommended**: Python 3.11 or 3.12 for best compatibility
 - **Node.js 22.12.0 or higher** - [Download Node.js](https://nodejs.org/)
 - **UV** (installed automatically with setup scripts) - [More information about UV](https://github.com/astral-sh/uv)
 
@@ -365,12 +367,26 @@ npm run build
 - Run the setup script which will install UV automatically
 - Or install manually from: https://github.com/astral-sh/uv
 
+### Error: "Python version too new" or "Failed to build pyroaring"
+- **Cause**: Python 3.13+ may have compatibility issues with C extensions
+- **Solution**: Use Python 3.11 or 3.12 instead
+- Download from: https://www.python.org/downloads/
+- On Windows: Install Visual Studio Build Tools with "Desktop development with C++" workload
+
+### Error: "Cannot open include file: 'io.h'" (Windows)
+- **Cause**: Missing C++ build tools
+- **Solution**: Install Visual Studio Build Tools
+  - Download: https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022
+  - Install "Desktop development with C++" workload
+  - Restart your terminal and try again
+
 ### Error: "Node.js version too old"
 - Update Node.js to version 22.12.0 or higher
 - Download from: https://nodejs.org/
 
 ### Error: "Module not found" (Backend)
 - Make sure the virtual environment is activated
+- Verify you're using Python 3.10-3.12 (not 3.13+)
 - Run: `uv pip install -r deps/requirements.txt`
 - Or use pyproject.toml: `cd deps && uv pip install -e . && cd ..`
 

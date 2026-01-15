@@ -25,12 +25,36 @@ NC='\033[0m' # No Color
 # Step 1: Check Python version
 echo -e "${BLUE}📋 Checking Python version...${NC}"
 if ! command -v python3 &> /dev/null; then
-    echo -e "${YELLOW}❌ Python 3 is not installed. Please install Python 3.10 or higher.${NC}"
+    echo -e "${YELLOW}❌ Python 3 is not installed. Please install Python 3.10, 3.11, or 3.12.${NC}"
+    echo -e "${YELLOW}   Recommended: Python 3.11 or 3.12 for best compatibility${NC}"
     exit 1
 fi
 
-PYTHON_VERSION=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1,2)
-echo -e "${GREEN}✅ Python $PYTHON_VERSION detected${NC}"
+PYTHON_VERSION_FULL=$(python3 --version | cut -d' ' -f2)
+PYTHON_VERSION=$(echo $PYTHON_VERSION_FULL | cut -d'.' -f1,2)
+PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d'.' -f1)
+PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d'.' -f2)
+
+echo -e "${GREEN}✅ Python $PYTHON_VERSION_FULL detected${NC}"
+
+# Check if version is supported (3.10 - 3.12)
+if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 10 ]); then
+    echo -e "${YELLOW}❌ Python 3.10 or higher is required. You have Python $PYTHON_VERSION_FULL${NC}"
+    echo -e "${YELLOW}   Please install Python 3.10, 3.11, or 3.12${NC}"
+    exit 1
+fi
+
+# Store detected version for later use
+DETECTED_PYTHON_VERSION="$PYTHON_VERSION_FULL"
+DETECTED_MAJOR="$PYTHON_MAJOR"
+DETECTED_MINOR="$PYTHON_MINOR"
+
+# Warn about Python 3.13+ compatibility
+if [ "$PYTHON_MAJOR" -gt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -gt 12 ]); then
+    echo -e "${YELLOW}⚠️  Python $PYTHON_VERSION_FULL detected. This project is tested with Python 3.10-3.12.${NC}"
+    echo -e "${YELLOW}   Python 3.13+ may have compatibility issues with C extensions (e.g., pyroaring).${NC}"
+    echo -e "${BLUE}   UV will try to find and use Python 3.11 or 3.12 for the virtual environment.${NC}"
+fi
 
 # Step 2: Install UV if not present
 echo -e "${BLUE}📦 Checking for UV...${NC}"
@@ -49,11 +73,65 @@ else
     echo -e "${GREEN}✅ UV is already installed${NC}"
 fi
 
-# Step 3: Create virtual environment with UV
-echo -e "${BLUE}🔧 Creating virtual environment with UV...${NC}"
-uv venv
+# Step 3: Determine Python version for virtual environment
+echo -e "${BLUE}🔧 Preparing virtual environment...${NC}"
+PYTHON_VERSION_FOR_VENV=""
 
-# Step 4: Activate virtual environment
+# Check if detected Python version is compatible (3.10-3.12)
+if [ "$DETECTED_MAJOR" -eq 3 ] && [ "$DETECTED_MINOR" -ge 10 ] && [ "$DETECTED_MINOR" -le 12 ]; then
+    # Use the detected Python version
+    PYTHON_VERSION_FOR_VENV="$DETECTED_PYTHON_VERSION"
+    echo -e "${GREEN}✅ Using Python $PYTHON_VERSION_FOR_VENV for virtual environment${NC}"
+else
+    # Try to find a compatible Python version using UV
+    echo -e "${BLUE}   Detected Python version may have compatibility issues. Checking for Python 3.11 or 3.12...${NC}"
+    
+    # Preferred versions in order of preference
+    PREFERRED_VERSIONS=("3.12" "3.11" "3.10")
+    
+    for pref_version in "${PREFERRED_VERSIONS[@]}"; do
+        echo -e "${BLUE}   Checking for Python $pref_version...${NC}"
+        if uv python find "$pref_version" >/dev/null 2>&1; then
+            PYTHON_VERSION_FOR_VENV="$pref_version"
+            echo -e "${GREEN}✅ Found Python $pref_version via UV${NC}"
+            break
+        fi
+    done
+    
+    if [ -z "$PYTHON_VERSION_FOR_VENV" ]; then
+        # Try to install Python 3.12 via UV
+        echo -e "${BLUE}   Attempting to install Python 3.12 via UV...${NC}"
+        if uv python install 3.12 >/dev/null 2>&1; then
+            PYTHON_VERSION_FOR_VENV="3.12"
+            echo -e "${GREEN}✅ Installed Python 3.12 via UV${NC}"
+        else
+            echo -e "${YELLOW}⚠️  Could not install Python 3.12 via UV automatically${NC}"
+        fi
+    fi
+    
+    if [ -z "$PYTHON_VERSION_FOR_VENV" ]; then
+        echo -e "${YELLOW}⚠️  No compatible Python version found automatically.${NC}"
+        echo -e "${YELLOW}   The virtual environment will use your system Python ($DETECTED_PYTHON_VERSION).${NC}"
+        echo -e "${YELLOW}   If you encounter build errors, please install Python 3.11 or 3.12 manually:${NC}"
+        echo -e "${YELLOW}   - Download from: https://www.python.org/downloads/${NC}"
+        echo -e "${YELLOW}   - Or run manually: uv python install 3.12${NC}"
+        PYTHON_VERSION_FOR_VENV="$DETECTED_PYTHON_VERSION"
+    fi
+fi
+
+# Step 4: Create virtual environment with UV
+echo -e "${BLUE}🔧 Creating virtual environment with UV...${NC}"
+if [ -n "$PYTHON_VERSION_FOR_VENV" ] && [ "$PYTHON_VERSION_FOR_VENV" != "$DETECTED_PYTHON_VERSION" ]; then
+    echo -e "${BLUE}   Using Python $PYTHON_VERSION_FOR_VENV (via UV) instead of system Python $DETECTED_PYTHON_VERSION${NC}"
+    uv venv --python "$PYTHON_VERSION_FOR_VENV"
+elif [ -n "$PYTHON_VERSION_FOR_VENV" ]; then
+    echo -e "${BLUE}   Using Python $PYTHON_VERSION_FOR_VENV for virtual environment${NC}"
+    uv venv --python "$PYTHON_VERSION_FOR_VENV"
+else
+    uv venv
+fi
+
+# Step 5: Activate virtual environment
 echo -e "${BLUE}🔌 Activating virtual environment...${NC}"
 source .venv/bin/activate
 
@@ -64,6 +142,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
+INSTALL_SUCCESS=false
+
 if [ "$USE_PYPROJECT" = true ]; then
     echo -e "${BLUE}📥 Installing dependencies from pyproject.toml...${NC}"
     echo -e "${BLUE}   (Alternative method - using pyproject.toml)${NC}"
@@ -71,19 +151,49 @@ if [ "$USE_PYPROJECT" = true ]; then
     # Note: pyproject.toml is in deps/ folder
     # We need to change to deps directory
     cd deps
-    uv pip install -e .
+    if uv pip install -e .; then
+        INSTALL_SUCCESS=true
+    else
+        INSTALL_SUCCESS=false
+    fi
     cd ..
 else
     echo -e "${BLUE}📥 Installing dependencies from requirements.txt...${NC}"
     echo -e "${BLUE}   (Default method - using requirements.txt)${NC}"
     # Default: use requirements.txt for dependency installation
     # Note: requirements.txt is in deps/ folder
-    uv pip install -r deps/requirements.txt
+    if uv pip install -r deps/requirements.txt; then
+        INSTALL_SUCCESS=true
+    else
+        INSTALL_SUCCESS=false
+    fi
 fi
 
-# Step 6: Verify Python installation
+if [ "$INSTALL_SUCCESS" = false ]; then
+    echo -e "${YELLOW}❌ Dependency installation failed!${NC}"
+    echo ""
+    echo -e "${YELLOW}Common causes:${NC}"
+    echo -e "${YELLOW}   1. Python version too new (3.13+) - Use Python 3.11 or 3.12 instead${NC}"
+    echo -e "${YELLOW}   2. Missing build tools (gcc, make, python3-dev)${NC}"
+    echo -e "${YELLOW}   3. Network issues or package registry problems${NC}"
+    echo ""
+    echo -e "${BLUE}Solutions:${NC}"
+    echo -e "${BLUE}   - If using Python 3.13+, downgrade to Python 3.11 or 3.12${NC}"
+    echo -e "${BLUE}   - Install build tools: sudo apt-get install build-essential python3-dev (Ubuntu/Debian)${NC}"
+    echo -e "${BLUE}   - Install build tools: brew install python3 (macOS)${NC}"
+    echo -e "${BLUE}   - Try again: uv pip install -r deps/requirements.txt${NC}"
+    exit 1
+fi
+
+# Step 7: Verify Python installation
 echo -e "${BLUE}✅ Verifying Python installation...${NC}"
-python -c "import fastapi; import uvicorn; print('✅ Core dependencies installed successfully')"
+if python -c "import fastapi; import uvicorn; print('✅ Core dependencies installed successfully')" 2>&1; then
+    echo -e "${GREEN}✅ Verification successful${NC}"
+else
+    echo -e "${YELLOW}❌ Verification failed. Some dependencies may be missing.${NC}"
+    echo -e "${YELLOW}   Try running: uv pip install -r deps/requirements.txt manually${NC}"
+    exit 1
+fi
 
 # Step 6.5: Upgrade pip to prevent package installation issues
 echo -e "${BLUE}📦 Upgrading pip to latest version...${NC}"
@@ -93,7 +203,7 @@ else
     echo -e "${YELLOW}⚠️  Failed to upgrade pip. Continuing anyway...${NC}"
 fi
 
-# Step 6.6: Download SpaCy model (required for match score calculation)
+# Step 7.6: Download SpaCy model (required for match score calculation)
 echo -e "${BLUE}📥 Downloading SpaCy language model (en_core_web_sm)...${NC}"
 echo -e "${BLUE}   This is required for match score calculation and may take a few minutes...${NC}"
 echo -e "${BLUE}   Note: SpaCy models are downloaded separately from Python packages.${NC}"
@@ -126,7 +236,7 @@ else
     fi
 fi
 
-# Step 8: Setup frontend if Node.js is available
+# Step 9: Setup frontend if Node.js is available
 if [ "$FRONTEND_SETUP" = true ]; then
     echo -e "${BLUE}📦 Setting up frontend dependencies...${NC}"
     cd frontend
