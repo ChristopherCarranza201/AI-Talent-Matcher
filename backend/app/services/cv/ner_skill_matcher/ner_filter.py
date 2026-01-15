@@ -1,7 +1,32 @@
 import spacy
+import logging
 from typing import List, Set
 
-_nlp = spacy.load("en_core_web_sm")
+logger = logging.getLogger(__name__)
+
+# Lazy-load SpaCy model to avoid import-time errors
+_nlp = None
+
+
+def _get_nlp():
+    """
+    Get or load the SpaCy NLP model.
+    Lazy-loaded to avoid import-time errors if model is not installed.
+    """
+    global _nlp
+    if _nlp is None:
+        try:
+            _nlp = spacy.load("en_core_web_sm")
+            logger.debug("SpaCy model 'en_core_web_sm' loaded successfully")
+        except OSError as e:
+            error_msg = (
+                "SpaCy model 'en_core_web_sm' is not installed. "
+                "Please run: python -m spacy download en_core_web_sm\n"
+                "Or run the setup script: deps/windows/setup.ps1 (Windows) or deps/macos-linux/setup.sh (macOS/Linux)"
+            )
+            logger.error(error_msg)
+            raise OSError(error_msg) from e
+    return _nlp
 
 
 def extract_explicit_skills(text: str, known_skills: set[str]) -> List[str]:
@@ -10,7 +35,8 @@ def extract_explicit_skills(text: str, known_skills: set[str]) -> List[str]:
     This is a FILTER, not a discovery mechanism.
     Returns max 20 skills that match known_skills from CSV.
     """
-    doc = _nlp(text.lower())
+    nlp = _get_nlp()
+    doc = nlp(text.lower())
     found = set()
 
     # Check noun chunks first (multi-word skills)
@@ -39,6 +65,9 @@ def match_roles_to_csv_titles(roles: List[str], csv_titles: Set[str]) -> List[st
     Returns list of matched CSV job titles.
     Requires ALL significant words from role to be present in title.
     """
+    # Load NLP model once for the entire function
+    nlp = _get_nlp()
+    
     matched_titles = []
     
     # Common words to ignore in matching (too generic)
@@ -59,7 +88,7 @@ def match_roles_to_csv_titles(roles: List[str], csv_titles: Set[str]) -> List[st
             continue
         
         # Use NER to extract ALL significant words from role (including common words for context)
-        doc = _nlp(role_lower)
+        doc = nlp(role_lower)
         all_role_words = [token.text for token in doc 
                          if token.pos_ in ['NOUN', 'PROPN', 'ADJ'] 
                          and len(token.text) > 2]
@@ -89,7 +118,7 @@ def match_roles_to_csv_titles(roles: List[str], csv_titles: Set[str]) -> List[st
                 continue
             
             # Extract words from title
-            title_doc = _nlp(title_lower)
+            title_doc = nlp(title_lower)
             all_title_words = [token.text for token in title_doc 
                               if token.pos_ in ['NOUN', 'PROPN', 'ADJ'] 
                               and len(token.text) > 2]

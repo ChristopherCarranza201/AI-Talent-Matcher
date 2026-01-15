@@ -96,16 +96,29 @@ try {
     exit 1
 }
 
-# Step 6.5: Download SpaCy model (required for match score calculation)
+# Step 6.5: Upgrade pip to prevent package installation issues
+Write-Host "`n[INFO] Upgrading pip to latest version..." -ForegroundColor Blue
+try {
+    python -m pip install --upgrade pip --quiet
+    Write-Host "[OK] Pip upgraded successfully" -ForegroundColor Green
+} catch {
+    Write-Host "[WARNING] Failed to upgrade pip. Continuing anyway..." -ForegroundColor Yellow
+}
+
+# Step 6.6: Download SpaCy model (required for match score calculation)
 Write-Host "`n[INFO] Downloading SpaCy language model (en_core_web_sm)..." -ForegroundColor Blue
 Write-Host "   This is required for match score calculation and may take a few minutes..." -ForegroundColor Cyan
-try {
-    python -m spacy download en_core_web_sm
+Write-Host "   Note: SpaCy models are downloaded separately from Python packages." -ForegroundColor Cyan
+$spacyResult = python -m spacy download en_core_web_sm 2>&1
+if ($LASTEXITCODE -eq 0) {
     Write-Host "[OK] SpaCy model downloaded successfully" -ForegroundColor Green
-} catch {
+} else {
     Write-Host "[WARNING] Failed to download SpaCy model automatically." -ForegroundColor Yellow
+    Write-Host "   Exit code: $LASTEXITCODE" -ForegroundColor Yellow
+    Write-Host "   Error output: $spacyResult" -ForegroundColor Yellow
     Write-Host "   You may need to run manually: python -m spacy download en_core_web_sm" -ForegroundColor Yellow
     Write-Host "   Match score calculation will fail without this model." -ForegroundColor Yellow
+    Write-Host "   The backend will start, but match scores cannot be calculated until the model is installed." -ForegroundColor Yellow
 }
 
 # Step 7: Check Node.js for frontend

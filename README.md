@@ -1,5 +1,16 @@
 # AI Talent Matcher
 
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.127.0-009688?style=flat&logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-18.3-61DAFB?style=flat&logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat&logo=typescript&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-2.27-3ECF8E?style=flat&logo=supabase&logoColor=white)
+![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o--mini-412991?style=flat&logo=openai&logoColor=white)
+![LangChain](https://img.shields.io/badge/LangChain-0.3+-1C3C3C?style=flat&logo=langchain&logoColor=white)
+![SpaCy](https://img.shields.io/badge/SpaCy-3.7+-09A3D5?style=flat&logo=spacy&logoColor=white)
+![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3.4-38B2AC?style=flat&logo=tailwind-css&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-7.3-646CFF?style=flat&logo=vite&logoColor=white)
+
 Intelligent technical recruitment platform that automates candidate evaluation and vacancy creation using AI agents. The system analyzes CVs, evaluates alignment with job requirements, and produces an objective Match Score to support faster, data-driven hiring decisions.
 
 ## 🚀 Main Features
@@ -75,7 +86,10 @@ uv venv
 # Unix/Linux/macOS:
 source .venv/bin/activate
 
-# 4. Install backend dependencies
+# 4. Upgrade pip to prevent package installation issues
+python -m pip install --upgrade pip
+
+# 5. Install backend dependencies
 # Using requirements.txt (default):
 uv pip install -r deps/requirements.txt
 
@@ -83,6 +97,10 @@ uv pip install -r deps/requirements.txt
 cd deps
 uv pip install -e .
 cd ..
+
+# 6. Download SpaCy language model (required for match score calculation)
+# Note: SpaCy models are downloaded separately from Python packages
+python -m spacy download en_core_web_sm
 ```
 
 #### Frontend
@@ -171,36 +189,78 @@ npm run dev
 
 ```
 AI-Talent-Matcher/
-├── backend/                 # FastAPI Backend
+├── backend/                        # FastAPI Backend
 │   └── app/
-│       ├── api/            # API Endpoints
-│       ├── agents/         # AI Agents
-│       ├── core/           # Configuration and security
-│       ├── db/             # Database connection
-│       ├── schemas/        # Pydantic models
-│       ├── services/       # Business logic
-│       └── main.py         # Entry point
-├── frontend/               # React + Vite Frontend
+│       ├── api/                    # API Endpoints (auth, jobs, applications, cv, etc.)
+│       ├── agents/                 # AI Agents
+│       │   ├── cv_extraction/      # CV parsing agents (identity, education, experience, etc.)
+│       │   ├── llm_job_description.py
+│       │   ├── llm_requirements.py
+│       │   └── llm_skills.py
+│       ├── core/                   # Configuration and security
+│       │   ├── config.py           # Environment variables and settings
+│       │   └── security.py        # JWT and authentication
+│       ├── db/                     # Database connection
+│       │   └── supabase.py        # Supabase client
+│       ├── schemas/                # Pydantic models
+│       │   ├── application.py
+│       │   ├── auth.py
+│       │   ├── cv/                # CV-related schemas (extraction, match, update)
+│       │   ├── job.py
+│       │   └── profile_updates.py
+│       ├── services/               # Business logic
+│       │   ├── auth_service.py
+│       │   └── cv/                # CV processing services
+│       │       ├── extraction_service.py    # CV parsing orchestration
+│       │       ├── match_service.py         # Match score calculation
+│       │       ├── storage_service.py       # Supabase Storage operations
+│       │       ├── match_analysis/          # LLM match agents (education, experience, projects, certifications)
+│       │       ├── ner_skill_matcher/       # NER-based skill matching
+│       │       └── db/                     # Job skills CSV database
+│       ├── utils/                  # Utility functions
+│       │   ├── pdf_extractor.py   # PDF text extraction
+│       │   └── retry.py           # Retry logic
+│       └── main.py                 # Application entry point
+├── frontend/                       # React + Vite Frontend
 │   └── src/
-│       ├── components/     # React components
-│       ├── pages/          # Application pages
-│       ├── services/       # API services
-│       ├── hooks/          # Custom hooks
-│       ├── lib/            # Utility libraries (api, auth, utils)
-│       └── types/          # TypeScript definitions
-├── deps/                   # Dependencies and setup scripts
-│   ├── requirements.txt    # Python dependencies (default)
-│   ├── pyproject.toml      # Python project configuration (alternative)
-│   ├── windows/            # Windows setup scripts
-│   │   ├── setup.ps1       # Setup script (Windows)
-│   │   └── run-dev.ps1     # Run both servers (Windows)
-│   └── macos-linux/        # macOS/Linux setup scripts
-│       ├── setup.sh         # Setup script (Unix/Linux/macOS)
-│       └── run-dev.sh       # Run both servers (Unix/Linux/macOS)
-├── docs/                   # Documentation
-├── .venv/                  # Python virtual environment (generated)
-├── .env.example            # Environment variables template
-└── README.md               # This file
+│       ├── components/             # React components
+│       │   ├── candidate/         # Candidate-specific components
+│       │   ├── layout/            # Layout components (sidebars, navigation)
+│       │   ├── shared/            # Shared components (MatchScore, ImageUpload, etc.)
+│       │   └── ui/                # Shadcn UI components
+│       ├── pages/                 # Application pages
+│       │   ├── candidate/         # Candidate portal pages
+│       │   ├── recruiter/        # Recruiter portal pages
+│       │   └── [Index, Login, Register, Landing, NotFound].tsx
+│       ├── services/              # API services
+│       │   └── api.ts            # API client
+│       ├── hooks/                 # Custom React hooks
+│       │   ├── useApi.ts
+│       │   ├── useAuth.ts
+│       │   └── use-toast.ts
+│       ├── lib/                   # Utility libraries
+│       │   ├── api.ts            # API configuration
+│       │   ├── auth.ts            # Authentication utilities
+│       │   └── utils.ts          # General utilities
+│       └── types/                 # TypeScript definitions
+│           └── api.ts            # API type definitions
+├── deps/                           # Dependencies and setup scripts
+│   ├── requirements.txt           # Python dependencies (default)
+│   ├── pyproject.toml             # Python project configuration (alternative)
+│   ├── windows/                   # Windows setup scripts
+│   │   ├── setup.ps1              # Setup script (Windows)
+│   │   └── run-dev.ps1            # Run both servers (Windows)
+│   └── macos-linux/                # macOS/Linux setup scripts
+│       ├── setup.sh                # Setup script (Unix/Linux/macOS)
+│       └── run-dev.sh              # Run both servers (Unix/Linux/macOS)
+├── docs/                           # Documentation
+│   ├── migrations/                # Database migration scripts
+│   ├── database/                  # Database documentation
+│   └── [various documentation files]
+├── cv-parser/                     # CV parsing module (gitignored, optional)
+├── .venv/                          # Python virtual environment (generated)
+├── .env.example                    # Environment variables template
+└── README.md                       # This file
 ```
 
 ## 🌐 Access URLs
@@ -244,27 +304,38 @@ npm run build
 ## 🛠️ Technologies Used
 
 ### Backend
-- **FastAPI** - Modern and fast web framework
-- **Uvicorn** - High-performance ASGI server
-- **Supabase** - Backend as a service (PostgreSQL + Storage)
-- **Pydantic** - Data validation
-- **LangChain** - Framework for LLM applications
-- **OpenAI** - AI API for content generation
-- **Python-JOSE** - JWT authentication
+- **FastAPI 0.127.0** - Modern, fast web framework for building APIs
+- **Uvicorn 0.40.0** - High-performance ASGI server
+- **Supabase 2.27.0** - Backend as a service (PostgreSQL database + Storage)
+- **Pydantic 2.12.5** - Data validation and settings management
+- **LangChain 0.3+** - Framework for LLM applications and AI agents
+- **LangChain OpenAI 1.1.7** - OpenAI integration for LangChain
+- **OpenAI 2.14.0** - AI API for content generation (GPT-4o-mini)
+- **Python-JOSE 3.5.0** - JWT token encoding/decoding
+- **SpaCy 3.7+** - Natural Language Processing for skill extraction
+  - **en_core_web_sm** - English language model (downloaded separately)
+- **Pandas 2.0+** - Data processing and analysis
+- **PyPDF 3.0+** - PDF text extraction
+- **PyMuPDF 1.23+** - Fallback PDF processor for malformed PDFs
 
 ### Frontend
-- **React 18** - UI library
-- **TypeScript** - Static typing
-- **Vite** - Build tool and dev server
-- **TailwindCSS** - Utility-first CSS framework
-- **Shadcn UI** - UI components based on Radix UI
-- **React Query** - Server state management
-- **Axios** - HTTP client
-- **React Router** - Routing
+- **React 18.3.1** - UI library for building user interfaces
+- **TypeScript 5.8.3** - Static type checking
+- **Vite 7.3.0** - Build tool and development server
+- **TailwindCSS 3.4.17** - Utility-first CSS framework
+- **Shadcn UI** - High-quality UI components based on Radix UI
+- **React Query (TanStack Query) 5.83.0** - Server state management and caching
+- **Axios 1.13.2** - HTTP client for API requests
+- **React Router 6.30.1** - Client-side routing
+- **React Hook Form 7.61.1** - Form state management
+- **Zod 3.25.76** - Schema validation
+- **Lucide React** - Icon library
 
 ### Development Tools
-- **UV** - Ultra-fast Python package manager
+- **UV** - Ultra-fast Python package manager (10-100x faster than pip)
 - **npm** - Node.js package manager
+- **Python 3.10+** - Programming language
+- **Node.js 22.12.0+** - JavaScript runtime
 
 ## 📝 Important Notes
 

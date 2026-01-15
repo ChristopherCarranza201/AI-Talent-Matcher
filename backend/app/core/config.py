@@ -4,7 +4,11 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env file from backend directory (relative to this file)
+# This ensures it works regardless of where the server is started from
+_backend_dir = Path(__file__).parent.parent  # Go up from core/ to app/ to backend/
+_env_path = _backend_dir / ".env"
+load_dotenv(dotenv_path=_env_path)
 
 class Settings:
     SUPABASE_URL = os.getenv("SUPABASE_URL")
