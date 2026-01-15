@@ -231,7 +231,7 @@ try {
 Write-Host "`n[INFO] Checking pip installation..." -ForegroundColor Blue
 
 # Check if pip exists
-$pipCheck = python -m pip --version 2>&1
+python -m pip --version 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[INFO] Pip is not installed. Installing pip..." -ForegroundColor Blue
     python -m ensurepip --upgrade 2>&1 | Out-Null
@@ -256,7 +256,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Upgrade pip if it exists
-$pipCheckAfter = python -m pip --version 2>&1
+python -m pip --version 2>&1 | Out-Null
 if ($LASTEXITCODE -eq 0) {
     Write-Host "[INFO] Upgrading pip to latest version..." -ForegroundColor Blue
     python -m pip install --upgrade pip --quiet 2>&1 | Out-Null
