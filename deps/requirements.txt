@@ -33,6 +33,8 @@ openai==2.14.0
 pypdf>=3.0.0
 pymupdf>=1.23.0  # PyMuPDF - fallback for malformed PDFs with bbox errors
 
-# NLP & Data Processing
+# NLP & Data Processing (required for match score calculation)
+# Note: SpaCy models (like en_core_web_sm) are downloaded separately from Python packages.
+# The setup scripts automatically download en_core_web_sm, or run: python -m spacy download en_core_web_sm
 spacy>=3.7.0
 pandas>=2.0.0
